@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Gato Jetpack - Prototipo Phaser 3</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #game-container {
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+    <!-- Importamos Phaser 3 desde CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+</head>
+<body>
+
+<div id="game-container"></div>
+
+<script>
+/**
+ * CONFIGURACIÓN DEL JUEGO Y VARIABLES GLOBALES
+ */
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    parent: 'game-container',
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 800 },
+            debug: false
+        }
+    },
+    scene: [] // Se llenará dinámicamente
+};
+
+// URLs de Assets (Según especificación)
+const ASSETS = {
+    gato: 'https://i.postimg.cc/1XfSmZsQ/gato.png',
+    gatoVuelo: 'https://i.postimg.cc/nztb8Qw1/gato-vuelo.png',
+    bg: 'https://i.postimg.cc/1X9Hw94W/background.png',
+    suelo: 'https://i.postimg.cc/VNqnRxy8/suelo.png',
+    plataforma: 'https://i.postimg.cc/1RJ0b18V/plataformas.png',
+    jetpack: 'https://i.postimg.cc/2SVfnYZ4/jetpack.png',
+    vida: 'https://i.postimg.cc/xjt757Yz/vida-del-gato.png',
+    enemy1: 'https://i.postimg.cc/J76JP3F4/enemy1.png',
+    enemy2: 'https://i.postimg.cc/tC86HqpT/enemy2.png',
+    jefe: 'https://i.postimg.cc/8PbCZTcd/jefe.png',
+    shotHero: 'https://i.postimg.cc/TwxqvRjc/disparo.png',
+    shotEnemy: 'https://i.postimg.cc/4N25HRGS/disparo-enemigo.png',
+    music: 'https://patrickdearteaga.com/audio/Electronic%20Fantasy.ogg'
+};
+
+/**
+ * ESCENA 1: BOOT (Carga de recursos)
+ */
+class BootScene extends Phaser.Scene {
+    constructor() { super('BootScene'); }
+
+    preload() {
+        // Barra de carga simple
+        let progressBar = this.add.graphics();
+        let width = this.cameras.main.width;
+        let height = this.cameras.main.height;
+        
+        this.load.on('progress', (value) => {
+            progressBar.clear();
+            progressBar.fillStyle(0x00ff00, 1);
+            progressBar.fillRect(width / 4, height / 2 - 30, (width / 2) * value, 30);
+        });
+
+        // IMPORTANTE: Manejo de errores de carga (CORS)
+        // Esto evita que el juego se congele si un asset falla
+        this.load.on('loaderror', (fileObj) => {
+            console.warn('⚠️ Error cargando asset:', fileObj.key, '- Es probable que sea un problema de CORS o URL rota.');
+        });
+
+        // Cargar imágenes
+        Object.keys(ASSETS).forEach(key => {
+            if(key !== 'music') this.load.image(key, ASSETS[key]);
+        });
+        
+        // Cargar audio
+        this.load.audio('bgm', ASSETS.music);
+    }
+
+    create() {
+        this.scene.start('MainMenuScene');
+    }
+}
+
+/**
+ * ESCENA 2: MENU PRINCIPAL (Selección de Dificultad)
+ */
+class MainMenuScene extends Phaser.Scene {
+    constructor() { super('MainMenuScene'); }
+
+    create() {
+        const { width, height } = this.scale;
+
+        // Fondo y Título
+        this.add.tileSprite(0, 0, width, height, 'bg').setOrigin(0).setAlpha(0.5);
+        
+        this.add.text(width/2, 100, 'SUPER GATO JETPACK', {
+            fontSize: '48px', fill: '#ffffff', stroke: '#000', strokeThickness: 6
+        }).setOrigin(0.5);
+
+        this.add.text(width/2, 180, 'Selecciona Dificultad', {
+            fontSize: '24px', fill: '#cccccc'
+        }).setOrigin(0.5);
+
+        // Botones de dificultad
+        this.createButton(width/2, 250, 'FÁCIL', 0x00ff00, 'easy');
+        this.createButton(width/2, 320, 'NORMAL', 0xffff00, 'normal');
+        this.createButton(width/2, 390, 'DIFÍCIL', 0xff0000, 'hard');
+        
+        this.add.text(width/2, 500, 'Flechas para mover | Z para saltar | X para disparar', {
+             fontSize: '18px', fill: '#fff' 
+        }).setOrigin(0.5);
+    }
+
+    createButton(x, y, label, color, difficultyKey) {
+        let btn = this.add.rectangle(x, y, 200, 50, color).setInteractive({ useHandCursor: true });
+        let txt = this.add.text(x, y, label, { fontSize: '24px', fill: '#000', fontStyle: 'bold' }).setOrigin(0.5);
+        
+        btn.on('pointerdown', () => {
+            this.scene.start('GamePlayScene', { difficulty: difficultyKey });
+        });
+        
+        // Efecto hover
+        btn.on('pointerover', () => btn.setScale(1.1));
+        btn.on('pointerout', () => btn.setScale(1));
+    }
+}
+
+/**
+ * ESCENA 3: GAMEPLAY (Lógica principal)
+ */
+class GamePlayScene extends Phaser.Scene {
+    constructor() { super('GamePlayScene'); }
+
+    init(data) {
+        this.difficulty = data.difficulty || 'normal';
+        this.lives = 7;
+        this.isGameOver = false;
+        this.jetpackTime = 0;
+        this.isFlying = false;
+        this.levelLength = 4000; // Largo del nivel
+    }
+
+    create() {
+        // Configurar dificultad
+        this.setupDifficulty();
+
+        // Música - CORRECCIÓN PARA EVITAR CRASH
+        // Verificamos si el audio existe en caché antes de intentar reproducirlo
+        if (this.cache.audio.exists('bgm')) {
+            if (!this.sound.get('bgm')) {
+                this.sound.play('bgm', { loop: true, volume: 0.5 });
+            }
+        } else {
+            console.log("🔊 Audio 'bgm' no disponible (probablemente bloqueado por CORS). El juego continuará sin música.");
+        }
+
+        // 1. FONDO (Parallax)
+        this.bg = this.add.tileSprite(0, 0, this.scale.width, this.scale.height, 'bg')
+            .setOrigin(0, 0)
+            .setScrollFactor(0);
+
+        // 2. MUNDO FÍSICO
+        this.platforms = this.physics.add.staticGroup();
+        this.createLevel();
+
+        // 3. JUGADOR
+        this.player = this.physics.add.sprite(100, 300, 'gato');
+        this.player.setCollideWorldBounds(false); // Permitimos que avance en el nivel
+        this.player.setScale(0.8);
+        this.player.body.setSize(this.player.width * 0.6, this.player.height); // Hitbox ajuste
+        this.physics.add.collider(this.player, this.platforms);
+
+        // 4. INPUTS
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.keyJump = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
+        this.keyShoot = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X);
+
+        // 5. CÁMARA
+        this.cameras.main.setBounds(0, 0, this.levelLength, 600);
+        this.cameras.main.startFollow(this.player, true, 0.05, 0.05);
+
+        // 6. GRUPOS DE OBJETOS
+        this.bullets = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image });
+        this.enemyBullets = this.physics.add.group({ classType: Phaser.Physics.Arcade.Image });
+        
+        this.enemies1 = this.physics.add.group(); // Patrulla
+        this.enemies2 = this.physics.add.group(); // Disparador
+        this.items = this.physics.add.group();
+
+        this.spawnEnemiesAndItems();
+        this.spawnBoss();
+
+        // 7. COLISIONES
+        this.physics.add.collider(this.enemies1, this.platforms);
+        this.physics.add.collider(this.enemies2, this.platforms);
+        this.physics.add.collider(this.items, this.platforms);
+
+        // Jugador vs Items
+        this.physics.add.overlap(this.player, this.items, this.collectItem, null, this);
+        
+        // Disparos
+        this.physics.add.overlap(this.bullets, this.enemies1, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.bullets, this.enemies2, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.bullets, this.boss, this.hitBoss, null, this);
+        this.physics.add.collider(this.bullets, this.platforms, (b) => b.destroy());
+
+        // Daño al jugador
+        this.physics.add.overlap(this.player, this.enemies1, this.hitPlayer, null, this);
+        this.physics.add.overlap(this.player, this.enemyBullets, this.hitPlayer, null, this);
+        
+        // 8. HUD
+        this.createHUD();
+
+        // Variables de estado
+        this.lastFired = 0;
+        this.invulnerable = false;
+    }
+
+    setupDifficulty() {
+        switch(this.difficulty) {
+            case 'easy':
+                this.enemySpeed = 100;
+                this.fireRateEnemy = 2500;
+                break;
+            case 'normal':
+                this.enemySpeed = 150;
+                this.fireRateEnemy = 1500;
+                break;
+            case 'hard':
+                this.enemySpeed = 250;
+                this.fireRateEnemy = 800;
+                break;
+        }
+    }
+
+    createLevel() {
+        // Suelo continuo
+        for (let x = 0; x < this.levelLength; x += 128) {
+            this.platforms.create(x, 568, 'suelo').setOrigin(0,0).refreshBody();
+        }
+        
+        // Plataformas aleatorias
+        for (let x = 300; x < this.levelLength - 500; x += Phaser.Math.Between(200, 400)) {
+            let y = Phaser.Math.Between(200, 450);
+            this.platforms.create(x, y, 'plataforma').setScale(0.5).refreshBody();
+        }
+    }
+
+    spawnEnemiesAndItems() {
+        // Generar a lo largo del nivel
+        for (let x = 500; x < this.levelLength - 600; x += Phaser.Math.Between(300, 600)) {
+            let type = Phaser.Math.Between(0, 100);
+            
+            if (type < 40) {
+                // Enemigo 1 (Patrulla)
+                let e = this.enemies1.create(x, 400, 'enemy1');
+                e.setBounce(1);
+                e.setCollideWorldBounds(true);
+                e.setVelocityX(this.enemySpeed);
+                e.setScale(0.7);
+            } else if (type < 70) {
+                // Enemigo 2 (Disparador)
+                let e = this.enemies2.create(x, 300, 'enemy2');
+                e.setScale(0.7);
+                e.body.allowGravity = false;
+                // Temporizador de disparo
+                this.time.addEvent({
+                    delay: this.fireRateEnemy,
+                    callback: () => this.enemyFire(e),
+                    loop: true
+                });
+            } else if (type < 85) {
+                // Vida
+                this.items.create(x, 450, 'vida').setData('type', 'life').setScale(0.5);
+            } else {
+                // Jetpack
+                this.items.create(x, 350, 'jetpack').setData('type', 'jetpack').setScale(0.5);
+            }
+        }
+    }
+
+    spawnBoss() {
+        // Jefe al final
+        this.boss = this.physics.add.sprite(this.levelLength - 200, 300, 'jefe');
+        this.boss.setImmovable(true);
+        this.boss.body.allowGravity = false;
+        this.boss.hp = 20; // Vida del jefe
+        this.boss.setScale(1.2);
+        
+        // Movimiento simple del jefe (arriba/abajo)
+        this.tweens.add({
+            targets: this.boss,
+            y: 100,
+            duration: 2000,
+            yoyo: true,
+            repeat: -1
+        });
+
+        // Ataque del jefe
+        this.time.addEvent({
+            delay: this.fireRateEnemy * 1.5,
+            callback: this.bossAttack,
+            callbackScope: this,
+            loop: true
+        });
+    }
+
+    update(time, delta) {
+        if (this.isGameOver) return;
+
+        // Fondo Parallax
+        this.bg.tilePositionX = this.cameras.main.scrollX * 0.5;
+
+        // Movimiento Jugador
+        if (this.cursors.left.isDown) {
+            this.player.setVelocityX(-200);
+            this.player.setFlipX(true);
+        } else if (this.cursors.right.isDown) {
+            this.player.setVelocityX(200);
+            this.player.setFlipX(false);
+        } else {
+            this.player.setVelocityX(0);
+        }
+
+        // Salto y Jetpack
+        const isGrounded = this.player.body.touching.down;
+
+        if (this.isFlying && this.keyJump.isDown) {
+            // Lógica de vuelo
+            this.player.setVelocityY(-250); // Impulso hacia arriba constante
+        } else if (isGrounded && this.keyJump.isDown) {
+            this.player.setVelocityY(-500);
+        }
+
+        // Disparo Jugador
+        if (Phaser.Input.Keyboard.JustDown(this.keyShoot) && time > this.lastFired) {
+            this.fireBullet();
+            this.lastFired = time + 400;
+        }
+
+        // Game Over si cae al vacío
+        if (this.player.y > 600) {
+            this.handleDeath();
+        }
+
+        // Actualizar patrullas (cambiar dirección si golpean pared invisible o bordes)
+        this.enemies1.children.iterate((child) => {
+            if (child && child.body.blocked.left) child.setVelocityX(this.enemySpeed);
+            if (child && child.body.blocked.right) child.setVelocityX(-this.enemySpeed);
+        });
+
+        // HUD Update
+        this.livesText.setText('Vidas: ' + this.lives);
+        if (this.isFlying) {
+            let remaining = Math.ceil((this.flyTimer.delay - this.flyTimer.getElapsed()) / 1000);
+            this.jetpackText.setText('JETPACK: ' + remaining + 's');
+            this.jetpackText.setVisible(true);
+        } else {
+            this.jetpackText.setVisible(false);
+        }
+    }
+
+    fireBullet() {
+        let b = this.bullets.create(this.player.x, this.player.y, 'shotHero');
+        if(b) {
+            b.setVelocityX(this.player.flipX ? -600 : 600);
+            b.body.allowGravity = false;
+            // Destruir después de 2 seg
+            this.time.delayedCall(2000, () => { if(b.active) b.destroy(); });
+        }
+    }
+
+    enemyFire(enemy) {
+        if (!enemy.active || !this.cameras.main.worldView.contains(enemy.x, enemy.y)) return;
+        
+        let b = this.enemyBullets.create(enemy.x, enemy.y, 'shotEnemy');
+        if(b) {
+            this.physics.moveToObject(b, this.player, 200); // Apunta al jugador
+            // Rotación hacia el jugador
+            b.rotation = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+            this.time.delayedCall(3000, () => { if(b.active) b.destroy(); });
+        }
+    }
+
+    bossAttack() {
+        if (!this.boss.active || !this.cameras.main.worldView.contains(this.boss.x, this.boss.y)) return;
+
+        // Disparo triple en abanico
+        const angles = [0, -0.3, 0.3]; // Radianes relativos
+        const baseAngle = Phaser.Math.Angle.Between(this.boss.x, this.boss.y, this.player.x, this.player.y);
+
+        angles.forEach(ang => {
+            let b = this.enemyBullets.create(this.boss.x, this.boss.y, 'shotEnemy');
+            b.setTint(0xff0000); // Color diferente para balas de jefe
+            b.setScale(1.5);
+            this.physics.velocityFromRotation(baseAngle + ang, 250, b.body.velocity);
+            b.rotation = baseAngle + ang;
+        });
+    }
+
+    collectItem(player, item) {
+        if (item.getData('type') === 'life') {
+            if (this.lives < 7) this.lives++;
+        } else {
+            this.activateJetpack();
+        }
+        item.destroy();
+    }
+
+    activateJetpack() {
+        this.isFlying = true;
+        this.player.setTexture('gatoVuelo');
+        
+        // Si ya había un timer, lo reseteamos
+        if (this.flyTimer) this.flyTimer.remove();
+
+        this.flyTimer = this.time.delayedCall(3000, () => {
+            this.isFlying = false;
+            this.player.setTexture('gato');
+        });
+    }
+
+    hitEnemy(bullet, enemy) {
+        bullet.destroy();
+        enemy.destroy();
+        // Feedback visual
+        let p = this.add.particles(enemy.x, enemy.y, 'shotEnemy', {
+            speed: 100, scale: { start: 0.5, end: 0 }, lifespan: 500
+        });
+        this.time.delayedCall(500, () => p.destroy());
+    }
+
+    hitBoss(bullet, boss) {
+        bullet.destroy();
+        this.boss.hp--;
+        this.boss.setTint(0xff0000);
+        this.time.delayedCall(100, () => this.boss.clearTint());
+
+        if (this.boss.hp <= 0) {
+            this.boss.destroy();
+            this.scene.start('GameOverScene', { win: true });
+        }
+    }
+
+    hitPlayer(player, hazard) {
+        if (this.invulnerable) return;
+        
+        if (hazard.texture && hazard.texture.key === 'shotEnemy') hazard.destroy(); // Destruir bala
+
+        this.lives--;
+        this.cameras.main.shake(100, 0.01);
+
+        if (this.lives <= 0) {
+            this.handleDeath();
+        } else {
+            // Invulnerabilidad temporal
+            this.invulnerable = true;
+            this.tweens.add({
+                targets: this.player,
+                alpha: 0.2,
+                duration: 100,
+                yoyo: true,
+                repeat: 5,
+                onComplete: () => {
+                    this.invulnerable = false;
+                    this.player.alpha = 1;
+                }
+            });
+        }
+    }
+
+    handleDeath() {
+        this.isGameOver = true;
+        this.physics.pause();
+        this.player.setTint(0xff0000);
+        this.time.delayedCall(1000, () => {
+            this.scene.start('GameOverScene', { win: false });
+        });
+    }
+
+    createHUD() {
+        this.livesText = this.add.text(20, 20, 'Vidas: 7', { fontSize: '24px', fill: '#fff' }).setScrollFactor(0);
+        this.jetpackText = this.add.text(20, 50, 'JETPACK', { fontSize: '24px', fill: '#ffff00' }).setScrollFactor(0);
+        this.jetpackText.setVisible(false);
+    }
+}
+
+/**
+ * ESCENA 4: GAME OVER / VICTORIA
+ */
+class GameOverScene extends Phaser.Scene {
+    constructor() { super('GameOverScene'); }
+
+    init(data) {
+        this.win = data.win;
+    }
+
+    create() {
+        const { width, height } = this.scale;
+        
+        this.add.rectangle(0, 0, width, height, 0x000000, 0.8).setOrigin(0);
+        
+        let msg = this.win ? '¡VICTORIA!' : 'GAME OVER';
+        let color = this.win ? '#00ff00' : '#ff0000';
+
+        this.add.text(width/2, height/3, msg, {
+            fontSize: '64px', fill: color, stroke: '#fff', strokeThickness: 2
+        }).setOrigin(0.5);
+
+        let btn = this.add.rectangle(width/2, height/2, 200, 50, 0xffffff).setInteractive({ useHandCursor: true });
+        let btnText = this.add.text(width/2, height/2, 'Volver al Menú', { fontSize: '20px', fill: '#000' }).setOrigin(0.5);
+
+        btn.on('pointerdown', () => {
+            this.scene.start('MainMenuScene');
+        });
+    }
+}
+
+// Inicializar el juego
+config.scene = [BootScene, MainMenuScene, GamePlayScene, GameOverScene];
+const game = new Phaser.Game(config);
+
+</script>
+</body>
+</html>
